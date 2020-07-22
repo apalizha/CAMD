@@ -164,7 +164,7 @@ class MetaAgentCampaign(Campaign):
             create_seed=1
         )
 
-    def autorun(self):
+    def autorun(self, n_iterations):
         """
         Convenience method for standard running procedure
 
@@ -172,7 +172,7 @@ class MetaAgentCampaign(Campaign):
             (None)
 
         """
-        self.auto_loop(n_iterations=5, initialize=True)
+        self.auto_loop(n_iterations=n_iterations, initialize=True)
 
 
 # TODO: move this into analysis
@@ -209,4 +209,3 @@ class StabilityCampaignAnalyzer(AnalyzerBase):
         # load seed data
         df = pd.read_pickle("seed_data.pickle")
         self._plot(df)
-

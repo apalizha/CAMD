@@ -32,18 +32,19 @@ class GenericMultiAgent(HypothesisAgent):
     A multi-fidelity agent that takes in sklearn supervised regressor
     (GPR excluded) and generate hypotheses.
     """
-    def __init__(self, target_prop='bandgap', target_prop_val=1.8,
-                 candidate_data=None, seed_data=None, preprocessor=StandardScaler(),
-                 model=None, n_query=None, exp_query_frac=0.2, cost_considered=False):
+    def __init__(self, target_prop='bandgap', target_prop_val=1.8,candidate_data=None, seed_data=None, 
+                 preprocessor=StandardScaler(), model=None, 
+                 query_criteria='cost_ratio', total_budget=None, exp_query_frac=0.2, theor_per_expt=2):
         self.target_prop = target_prop
         self.target_prop_val = target_prop_val
         self.candidate_data = candidate_data
         self.seed_data = seed_data
         self.preprocessor = preprocessor
         self.model = model
-        self.n_query = n_query
+        self.query_criteria = query_criteria
+        self.total_budget = total_budget
         self.exp_query_frac = exp_query_frac
-        self.cost_considered = cost_considered
+        self.theor_per_expt = theor_per_expt
         super(GenericMultiAgent).__init__()
         """
         Args:
@@ -57,11 +58,17 @@ class GenericMultiAgent(HypothesisAgent):
                                      StandardScaler().
             model                    The sklearn supervised machine learning regressor
                                      (GPR excluded).
-            N_query (int)            Number of hypotheses to be generated.
-            exp_query_frac (float)   The fraction of the hypotheses that are experimental
-                                     data. The value should be between 0 and 1.
-            cost_considered (bool)   If True, hypotheses are generated based on both prediction
-                                     and the cost of generating such hypotheses.
+            query_criteria (str)     Can be either 'cost_ratio' or 'number' to indicate which types of method
+                                     will be used to query hypotheses. .                        
+            total_budget (int)       The budget for the hypotheses query. If query_criteria is 'cost_ratio', this should 
+                                     be an amount indicate costs, if query_criteria is 'number', this should be a 
+                                     a total number of queries.
+            exp_query_frac (float)   The fraction of the total budget that are used for experimental
+                                     hypotheses queries. The value should be between 0 and 1.
+            theor_per_expt (int)     Theory hypotheses budget per experimental candidates. In other
+                                     words, the number of theory candidate selected to support each
+                                     experimental candidates that predicted to be good, but the agent
+                                     does not want to generate hypotheses yet. 
         """
 
     def _get_features_from_df(self, df, add_fea=[]):
@@ -88,9 +95,9 @@ class GenericMultiAgent(HypothesisAgent):
         test features and test labels.
         """
         X_train = self._get_features_from_df(seed_data, add_fea=['theory_data', 'expt_data']).values.tolist()
-        y_train = np.array(seed_data[[self.target_prop]])
+        y_train = np.array(seed_data[self.target_prop])
         X_test = self._get_features_from_df(candidate_data, add_fea=['theory_data', 'expt_data']).values.tolist()
-        y_test = np.array(candidate_data[[self.target_prop]])
+        y_test = np.array(candidate_data[self.target_prop])
         if self.preprocessor:
             X_train = self.preprocessor.fit_transform(X_train)
             X_test = self.preprocessor.transform(X_test)
@@ -111,49 +118,63 @@ class GenericMultiAgent(HypothesisAgent):
         l2_norm = np.linalg.norm(comp.values - seed_comps.values,  axis=1)
         return l2_norm
 
-    def _select_hypotheses(self, candidate_data, seed_data):
+    def _query_hypotheses(self, candidate_data, seed_data):
         exp_candidates = candidate_data.loc[candidate_data.expt_data == 1]
         theor_candidates = candidate_data.loc[candidate_data.theory_data == 1]
-
         seed_data_fea = self._get_features_from_df(seed_data)
         exp_cands_fea = self._get_features_from_df(exp_candidates)
-        theor_cands_fea = self._get_features_from_df(theor_candidates)
 
-        # set up an empty df
+        # set up an empty df for queries
         selected_hypotheses = pd.DataFrame(columns=candidate_data.columns)
-
-        # set up query conditions
-        if (len(exp_candidates) == 0):
-            selected_hypotheses = pd.DataFrame(columns=candidate_data.columns)
-
+        
+        # if there are no experimental data left in the candidate space, end the campaign
+        if len(exp_candidates) == 0:
+            return None
+         
+        # otherwise start the query   
         elif (len(exp_candidates) != 0) & (len(theor_candidates) == 0):
-            selected_hypotheses = selected_hypotheses.append(exp_candidates.head(self.n_query))
+            for idx, exp in exp_candidates.iterrows(): 
+                if self.query_criteria == 'number':
+                    total_cost = len(selected_hypotheses)
+                elif self.query_criteria == 'cost_ratio':
+                    total_cost = np.sum(selected_hypotheses[self.query_criteria])
 
-        elif (len(exp_candidates) != 0) & (len(theor_candidates) != 0):
-            num_exp_query = int(self.n_query * self.exp_query_frac)
+                if total_cost < self.total_budget:
+                    selected_hypotheses = selected_hypotheses.append(exp)
 
-            # select experimental hypotheses
+        else:
+            # first select experimental hypotheses
+            exp_budget = self.total_budget * self.exp_query_frac
             threshold = 200 # TODO, make threshold params
-            for idx, cand_fea in exp_cands_fea.iterrows(): #TODO fix
-                if len(selected_hypotheses) < num_exp_query:
+            for idx, cand_fea in exp_cands_fea.iterrows(): 
+                if self.query_criteria == 'number':
+                    expt_cost = len(selected_hypotheses)
+                elif self.query_criteria == 'cost_ratio':
+                    expt_cost = np.sum(selected_hypotheses[self.query_criteria])
+                
+                if expt_cost < exp_budget:
                     normdiff_lst = self._calculate_similarity(cand_fea, seed_data_fea)
                     mask = (normdiff_lst <= threshold)
                     if len(normdiff_lst[mask]) > 1:
                         selected_hypotheses = selected_hypotheses.append(exp_candidates.loc[idx])
 
-            # select DFT hypotheses
+            # for remaining of the budget, select DFT hypotheses
             remained_exp_cands_fea = exp_cands_fea.drop(selected_hypotheses.index)
+            theor_candidates_copy = theor_candidates.copy()
             for idx, cand_fea in remained_exp_cands_fea.iterrows():
-                if len(selected_hypotheses) < self.n_query:
-                    # TODO: fix appending normdiff to the df so we don't get a warning
-                    theor_candidates['normdiff'] = self._calculate_similarity(cand_fea, theor_cands_fea) 
-                    theor_candidates = theor_candidates.sort_values('normdiff')
-                    selected_hypotheses = selected_hypotheses.append(theor_candidates.head(4))
+                if self.query_criteria == 'number':
+                    total_cost = len(selected_hypotheses)
+                elif self.query_criteria == 'cost_ratio':
+                    total_cost = np.sum(selected_hypotheses[self.query_criteria])
+                    
+                if (total_cost < self.total_budget) & (len(theor_candidates_copy) !=0):
+                    theor_cands_fea = self._get_features_from_df(theor_candidates_copy)
+                    theor_candidates_copy['normdiff'] = self._calculate_similarity(cand_fea, theor_cands_fea) 
+                    theor_candidates_copy = theor_candidates_copy.sort_values('normdiff')
+                    selected_hypotheses = selected_hypotheses.append(theor_candidates_copy.head(self.theor_per_expt))
+                    theor_candidates_copy = theor_candidates_copy.drop(theor_candidates_copy.head(self.theor_per_expt).index)
 
         return selected_hypotheses
-
-    def _select_hypotheses_with_cost(self, candidate_data, seed_data):
-        pass
 
     def get_hypotheses(self, candidate_data, seed_data):
         X_train, y_train, X_test, y_test = self._process_data(candidate_data, seed_data)
@@ -162,12 +183,7 @@ class GenericMultiAgent(HypothesisAgent):
         candidate_data['prediction'] = y_pred
         candidate_data['dist_to_ideal'] = np.abs(self.target_prop_val - candidate_data['prediction'])
         candidate_data = candidate_data.sort_values(by=['dist_to_ideal'])
-
-        # TODO if exp candidates are exhausted, early stop for campaign
-        if self.cost_considered:
-            hypotheses = self._select_hypotheses_with_cost()
-        else:
-            hypotheses = self._select_hypotheses(candidate_data, seed_data)
+        hypotheses = self._query_hypotheses(candidate_data, seed_data)
         return hypotheses
 
 
@@ -178,15 +194,16 @@ class GPMultiAgent(HypothesisAgent):
     """
     def __init__(self, target_prop='bandgap', target_prop_val=1.8,
                  candidate_data=None, seed_data=None, preprocessor=StandardScaler(),
-                 n_query=None, exp_query_frac=0.2, cost_considered=False):
+                 alpha=1.0, unc_percentile = 20, query_criteria='cost_ratio', total_budget=None):
         self.target_prop = target_prop
         self.target_prop_val = target_prop_val
         self.candidate_data = candidate_data
         self.seed_data = seed_data
         self.preprocessor = preprocessor
-        self.n_query = n_query
-        self.exp_query_frac = exp_query_frac
-        self.cost_considered = cost_considered
+        self.alpha = alpha
+        self.unc_percentile = unc_percentile
+        self.query_criteria = query_criteria
+        self.total_budget = total_budget
         super(GPMultiAgent).__init__()
 
         """
@@ -199,21 +216,26 @@ class GPMultiAgent(HypothesisAgent):
             preprocessor             A sklearn preprocessor that preprocess the features.
                                      It can be a single step or a pipeline. The default is
                                      StandardScaler().
-            N_query (int)            Number of hypotheses to be generated.
-            exp_query_frac (float)   The fraction of the hypotheses that are experimental
-                                     data. The value should be between 0 and 1.
-            cost_considered (bool)   If True, hypotheses are generated based on both prediction
-                                     and the cost of generating such hypotheses.
-        """
+            alpha (float)            mixing parameter for uncertainties in UCB. It controls the 
+                                     trade-off between exploration and exploitation. Defaults to 1.0. 
+            unc_percentile (int)     A number between 0 and 100, and used to calculate an uncertainty threshold
+                                     at that percentile value. The threshold is then used to decide if the
+                                     agent is quering theory or experimental hypotheses. 
+            query_criteria (str)     Can be either 'cost_ratio' or 'number' to indicate which types of method
+                                     will be used to query hypotheses. .                        
+            total_budget (int)       The budget for the hypotheses query. If query_criteria is 'cost_ratio', this should 
+                                     be an amount indicate costs, if query_criteria is 'number', this should be a 
+                                     a total number of queries. 
+            """
     def _get_features_from_df(self, df, add_fea=[]):
         """
         Helper function to get feature columns of a dataframe.
 
-        Args
+        Args:
             df              A pd.DataFrame where the features are extracted.
             add_fea(list)   Name of the additional features (str) used in ML.
 
-        Returns
+        Returns:
             feature_df      A pd.DataFrame that only contains the features used in ML.
                             by default, this will be compositional features.
         """
@@ -236,81 +258,50 @@ class GPMultiAgent(HypothesisAgent):
             X_train = self.preprocessor.fit_transform(X_train)
             X_test = self.preprocessor.transform(X_test)
         return X_train, y_train, X_test, y_test
-
-    def _calculate_similarity(self, comp, seed_comps):
+    
+    def _query_hypotheses(self, candidate_data, seed_data):
         """
-        Helper function that calculates similarity between a composition
-        and the seed data compositions. The similarity is reprsented by l2_norm.
-
-        Args:
-            comp(pd.core.series):    a specific composition represented by Magpie.
-            seed_comps (df):         Compostions in seed represented by Magpie.
+        idea behind MF-GP-UCB algorithm
         """
-        # match dimension to element wise operations
-        comp = pd.DataFrame([comp]*len(seed_comps))
-        l2_norm = np.linalg.norm(comp.values - seed_comps.values,  axis=1)
-        return l2_norm
+        seed_expt_data_chemsys = seed_data.loc[seed_data.expt_data==1].reduced_formula.values
 
-    def _select_hypotheses(self, candidate_data, seed_data):
-        exp_candidates = candidate_data.loc[candidate_data.expt_data == 1]
-        theor_candidates = candidate_data.loc[candidate_data.theory_data == 1]
-
-        seed_data_fea = self._get_features_from_df(seed_data)
-        theor_cands_fea = self._get_features_from_df(theor_candidates)
-
-        # set up an empty df
-        selected_hypotheses = pd.DataFrame(columns=candidate_data.columns)
-
-        # set up query conditions
-        if (len(exp_candidates) == 0):
-            selected_hypotheses = pd.DataFrame(columns=candidate_data.columns)
-
-        elif (len(exp_candidates) != 0) & (len(theor_candidates) == 0):
-            selected_hypotheses = selected_hypotheses.append(exp_candidates.head(self.n_query))
-
-        elif (len(exp_candidates) != 0) & (len(theor_candidates) != 0):
-            num_exp_query = int(self.n_query * self.exp_query_frac)
-            unc_thres = np.percentile(np.array(candidate_data.pred_unc), 30)
-
-            threshold = 200 # TODO, make threshold params
-            # expt query
-            certain_exp_candidates = exp_candidates.loc[exp_candidates.pred_unc <= unc_thres]
-            exp_cands_fea = self._get_features_from_df(certain_exp_candidates)
-            for idx, cand_fea in exp_cands_fea.iterrows():
-                if len(selected_hypotheses) < num_exp_query:
-                    normdiff_lst = self._calculate_similarity(cand_fea, seed_data_fea)
-                    mask = (normdiff_lst <= threshold)
-                    if len(normdiff_lst[mask]) > 1:
-                        selected_hypotheses = selected_hypotheses.append(certain_exp_candidates.loc[idx])
-
-            # For experimental prediction with high uncertainty, select DFT hypotheses
-            remained_exp_candidates = exp_candidates.loc[exp_candidates.pred_unc > unc_thres]
-            remained_exp_cands_fea = self._get_features_from_df(remained_exp_candidates)
-            for idx, cand_fea in remained_exp_cands_fea.iterrows():
-                if len(selected_hypotheses) < self.n_query:
-                    # TODO: fix appending normdiff to the df so we don't get a warning
-                    theor_candidates['normdiff'] = self._calculate_similarity(cand_fea, theor_cands_fea)
-                    theor_candidates = theor_candidates.sort_values('normdiff')
-                    selected_hypotheses = selected_hypotheses.append(theor_candidates.head(4))
-        return selected_hypotheses
-
-    def _select_hypotheses_with_cost(self, candidate_data, seed_data):
-        pass
+        # get the ucb boundary, which is min(pred_ucb) of various fidelities for given chemsys
+        candidate_data = candidate_data.sort_values(by=['reduced_formula', 'pred_unc'])
+        ucb_boundary = candidate_data.drop_duplicates(subset='reduced_formula', keep='first')
+        ucb_boundary = ucb_boundary.sort_values('dist_to_ideal')
+        unc_thres = np.percentile(np.array(ucb_boundary.pred_unc), self.unc_percentile)
+        
+        # query hypotheses
+        selected_hypotheses = pd.DataFrame(columns=candidate_data.columns) 
+        for formula in ucb_boundary.reduced_formula.values:
+            if self.query_criteria == 'number':
+                total_cost = len(selected_hypotheses)
+            elif self.query_criteria == 'cost_ratio':
+                total_cost = np.sum(selected_hypotheses[self.query_criteria])
+               
+            if total_cost < self.total_budget:
+                # only query the composition if its expt data does not already exist in seed
+                if formula not in seed_expt_data_chemsys:
+                    theory = candidate_data.loc[(candidate_data.reduced_formula == formula)&
+                                                (candidate_data.theory_data == 1)]
+                    if len(theory) !=0 and theory.pred_unc.values[0] >= unc_thres:
+                        selected_hypotheses = selected_hypotheses.append(theory)
+                    else: 
+                        expt = candidate_data.loc[(candidate_data.reduced_formula == formula)&
+                                          (candidate_data.expt_data == 1)]
+                        selected_hypotheses = selected_hypotheses.append(expt) 
+        return selected_hypotheses     
 
     def get_hypotheses(self, candidate_data, seed_data):
         X_train, y_train, X_test, y_test = self._process_data(candidate_data, seed_data)
         gp = GPy.models.GPRegression(X_train, y_train)
         gp.optimize('bfgs', max_iters=200)
         y_pred, var = gp.predict(X_test)
-        candidate_data['prediction'] = y_pred
-        candidate_data['dist_to_ideal'] = np.abs(self.target_prop_val - y_pred)
-        candidate_data['pred_unc'] = var**0.5
-
-        candidate_data = candidate_data.sort_values(by=['dist_to_ideal'])
-        if self.cost_considered:
-            hypotheses = self._select_hypotheses_with_cost()
-        else:
-            hypotheses = self._select_hypotheses(candidate_data, seed_data)
+        pred_ucb = y_pred + self.alpha * var**0.5
+        dist_to_ideal = np.abs(self.target_prop_val - pred_ucb)
+        candidate_data['pred_unc'] = self.alpha * var**0.5
+        candidate_data['dist_to_ideal'] = dist_to_ideal 
+        hypotheses = self._query_hypotheses(candidate_data, seed_data)
         return hypotheses
 
 
@@ -318,20 +309,23 @@ class MultiAnalyzer(AnalyzerBase):
     """
     The multi-fidelity analyzer.
     """
-    def __init__(self, target_prop, prop_range, total_expt_discovery=0, total_cost=0.0, extra_stats=None):
+    def __init__(self, target_prop, prop_range, total_expt_queried=0, 
+                 total_expt_discovery=0, total_cost=0.0, extra_stats=None):
         """
         Args:
-            target_prop (str)       The name of the target property, e.g. "bandgap".
-            prop_range (list)       The range of the target property that is considered
-                                    ideal.
-            tot_expt_discovery (int) The total exp discovery after nth iteration.                     
-            total_cost(float)       The total cost of the hypotheses after nth iteration.       
-            extra_stats (dict)      A dictionary with key/value pairings that correspond
-                                    to additional statistics you want to fetch. Only the
-                                    recorded ones (TODO: x,y,z) can be fetched.
+            target_prop (str)        The name of the target property, e.g. "bandgap".
+            prop_range (list)        The range of the target property that is considered
+                                     ideal.
+            total_expt_queried (int) The total experimental queries after nth iteration. 
+            tot_expt_discovery (int) The total experimental discovery after nth iteration.                     
+            total_cost(float)        The total cost of the hypotheses after nth iteration.       
+            extra_stats (dict)       A dictionary with key/value pairings that correspond
+                                     to additional statistics you want to fetch. Only the
+                                     recorded ones (TODO: x,y,z) can be fetched.
         """
         self.target_prop = target_prop
         self.prop_range = prop_range
+        self.total_expt_queried = total_expt_queried
         self.total_expt_discovery = total_expt_discovery
         self.total_cost = total_cost
         self.extra_stats = extra_stats # TODO
@@ -356,17 +350,20 @@ class MultiAnalyzer(AnalyzerBase):
 
         # total discovery = up to (& including) the current iteration
         new_seed = seed_data.append(new_experimental_results)
+        self.total_expt_queried += len(new_expt_hypotheses)
         self.total_expt_discovery += len(new_discoveries)
         self.total_cost += iter_cost
         
-
         summary = pd.DataFrame(
                 {
                  "expt_queried": [len(new_expt_hypotheses)],
+                 "total_expt_queried": [self.total_expt_queried], 
                  "new_expt_discovery": [len(new_discoveries)],
                  "iteration_cost": [iter_cost],
                  "total_expt_discovery": [self.total_expt_discovery],
-                 "total_cost": [self.total_cost]
+                 "total_cost": [self.total_cost], 
+                 "total_regret": [self.total_expt_queried - self.total_expt_discovery], 
+                 "success_rate": [self.total_expt_discovery/self.total_expt_queried]
             }
         )
         return summary, new_seed
