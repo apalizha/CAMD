@@ -118,7 +118,9 @@ class RegressorAgent(HypothesisAgent):
     def get_hypotheses(self, candidate_data, seed_data=None):
         self.candidate_data = candidate_data
         self.seed_data = seed_data
-    
+        
+        self.candidate_data.fillna(-1)
+        # not every model has same length
         feature_columns = self.feature_cols or candidate_data.columns.remove(self.target_prop)
         X_seed = seed_data[feature_columns]
         y_seed = seed_data[self.target_prop]
