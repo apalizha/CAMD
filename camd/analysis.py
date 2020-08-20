@@ -690,7 +690,7 @@ class MultiAnalyzer(AnalyzerBase):
     """
     The multi-fidelity analyzer.
     """
-    def __init__(self, target_prop, prop_range, total_expt_queried=0, 
+    def __init__(self, target_prop, prop_range, total_expt_queried=0,
                  total_expt_discovery=0, analyze_cost=True, total_cost=0.0):
         """
         Args:
@@ -701,9 +701,6 @@ class MultiAnalyzer(AnalyzerBase):
             tot_expt_discovery (int) The total experimental discovery after nth iteration. 
             analyze_cost (bool)      If the input has cost factor, also analyze that information. 
             total_cost(float)        The total cost of the hypotheses after nth iteration.       
-            extra_stats (dict)       A dictionary with key/value pairings that correspond
-                                     to additional statistics you want to fetch. Only the
-                                     recorded ones (TODO: x,y,z) can be fetched.
         """
         self.target_prop = target_prop
         self.prop_range = prop_range
@@ -722,9 +719,7 @@ class MultiAnalyzer(AnalyzerBase):
         return df.loc[(df[self.target_prop] >= self.prop_range[0]) &
                       (df[self.target_prop] <= self.prop_range[1])]
 
-    def analyze(self, new_experimental_results, seed_data):  #, agent=None):
-        positive_hits = self._filter_df_by_prop_range(new_experimental_results)
-
+    def analyze(self, new_experimental_results, seed_data):
         new_expt_hypotheses = new_experimental_results.loc[new_experimental_results['expt_data'] == 1]
         new_discoveries = self._filter_df_by_prop_range(new_expt_hypotheses)
 
@@ -738,11 +733,6 @@ class MultiAnalyzer(AnalyzerBase):
         else:
             success_rate = 0
         
-        if self.total_expt_discovery != 0:
-            average_cost_per_discovery = self.total_cost/self.total_expt_discovery
-        else:
-            average_cost_per_discovery = np.nan
-        
         summary = pd.DataFrame(
                 {
                  "expt_queried": [len(new_expt_hypotheses)],
@@ -753,12 +743,15 @@ class MultiAnalyzer(AnalyzerBase):
                  "success_rate": [success_rate]
             }
         )
- 
+
         if self.analyze_cost:
             iter_cost = np.sum(new_experimental_results["cost_ratio"])
             self.total_cost += iter_cost
             summary["iteration_cost"] = [iter_cost]
             summary["total_cost"] = [self.total_cost]
+            if self.total_expt_discovery != 0:
+                average_cost_per_discovery = self.total_cost/self.total_expt_discovery
+            else:
+                average_cost_per_discovery = np.nan
             summary['average_cost_per_discovery'] = [average_cost_per_discovery]
-
         return summary, new_seed 
