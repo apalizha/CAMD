@@ -9,6 +9,8 @@ import numpy as np
 from taburu.table import ParameterTable
 import pandas as pd
 
+from camd.agent.base import HypothesisAgent
+
 
 REGRESSOR_PARAMS = [
         {
@@ -84,3 +86,49 @@ if __name__ == "__main__":
     first = ParameterTable(AGENT_PARAMS)
     first.hydrate_index(3)
     first.hydrate_index(3, construct_object=True)
+
+
+class RegressorAgent(HypothesisAgent):
+    """
+    The agent used in meta_agent_campaign that selects the best campaign agent 
+    hyperparameters for the next iteration. 
+    """
+    def __init__(
+        self, model, target_prop, feature_cols, n_query=1, minimize=True
+    ):
+        """
+        Args:
+            model                   The ML model used to learn and predict the performance 
+                                    of different campaign agents. 
+            target_prop (str)       The target property that is being predicted. 
+            feature_cols (list)     A list (of string) that represent the name of the feature
+                                    data used in ML.
+            n_query (int)           The number of queries allowed. Defaults to 1.
+            minimize (bool)         If True, the agent with the minimum predicted target property 
+                                    is selected. Else, the agent with the maximum predicted target 
+                                    property is selected. 
+        """
+        self.model = model
+        self.target_prop = target_prop
+        self.feature_cols = feature_cols
+        self.n_query = n_query
+        self.minimize = minimize
+        super(RegressorAgent).__init__()
+
+    def get_hypotheses(self, candidate_data, seed_data=None):
+        self.candidate_data = candidate_data
+        self.seed_data = seed_data
+        
+        self.candidate_data.fillna(-1)
+        # not every model has same length
+        feature_columns = self.feature_cols or candidate_data.columns.remove(self.target_prop)
+        X_seed = seed_data[feature_columns]
+        y_seed = seed_data[self.target_prop]
+
+        self.model.fit(X_seed, y_seed)
+        y_pred = self.model.predict(self.candidate_data[feature_columns])
+        if self.minimize:
+            selected = np.argsort(y_pred)[:self.n_query]
+        else: 
+            selected = np.argsort(-1 * y_pred)[:self.n_query]
+        return candidate_data.iloc[selected]
