@@ -1,19 +1,24 @@
-numpy==1.18.3
-Django==2.2.13
+numpy==1.19.1
+Django==3.1
 tensorflow==1.15.2
 gpflow==1.5.0
-python-dateutil==2.8.0
-networkx==2.2
-matplotlib==3.1.1
-pandas==1.0.1
+python-dateutil==2.8.1
+networkx==2.4
+matplotlib==3.3.0
+pandas==1.1.0
 matminer==0.6.3
 autologging
+<<<<<<< HEAD
 awscli==1.18.82
+=======
+awscli==1.18.109
+boto3==1.14.32
+>>>>>>> master
 docopt==0.6.2
-boto3==1.12.28
-scikit-learn==0.22.1
+scikit-learn==0.23.2
 taburu==2020.5.9
 protosearch==2020.5.10
+GPy==1.9.9
 
 # Temporary qmpy3 dependency
 git+git://github.com/JosephMontoya-TRI/qmpy_py3@master#egg=qmpy

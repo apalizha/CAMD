@@ -11,6 +11,10 @@ from monty.os import cd
 
 
 class LocalAgentSimulation(Experiment):
+    """
+    Class that runs Agent simulations synchronously and
+    sequentially for testing in meta-agent campaigns.
+    """
     def __init__(self, atf_candidate_data, seed_data, analyzer, iterations,
                  current_data=None, job_status=None):
         """
@@ -91,4 +95,11 @@ class LocalAgentSimulation(Experiment):
         return campaign
 
     def get_results(self):
+        """
+        Gets current data corresponding to last run campaign
+
+        Returns:
+            (pandas.DataFrame) current data attribute
+
+        """
         return self.current_data

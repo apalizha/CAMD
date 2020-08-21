@@ -39,6 +39,7 @@ setup(
     description=DESCRIPTION,
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',
+<<<<<<< HEAD
     setup_requires=["numpy==1.18.3",
                     "Django==2.2.13"],
 #                     "tensorflow==1.15.2",
@@ -46,14 +47,30 @@ setup(
     install_requires=["python-dateutil==2.8.0",
                       "networkx==2.2",
                       "matplotlib==3.1.1",
+=======
+    setup_requires=["numpy==1.19.1",
+                    "Django==3.1",  # For qmpy depnedency
+                    "tensorflow==1.15.2",
+                    "gpflow==1.5.0"],
+    install_requires=["python-dateutil==2.8.1",
+                      "networkx==2.4",
+                      "matplotlib==3.3.0",
+>>>>>>> master
                       "qmpy",  # This version is constrained by the source
-                      "pandas==1.0.1",
+                      "pandas==1.1.0",
                       "matminer==0.6.3",
                       "autologging",
+<<<<<<< HEAD
                       "awscli==1.18.82",
                       "docopt==0.6.2",
                       "boto3==1.12.28",
                       "scikit-learn==0.22.1",
+=======
+                      "awscli==1.18.109",
+                      "boto3==1.14.32",
+                      "docopt==0.6.2",
+                      "scikit-learn==0.23.2",
+>>>>>>> master
                       "taburu==2020.5.9",
                       "GPy==1.9.9"
                       ],
@@ -66,7 +83,6 @@ setup(
     },
     dependency_links=[
         "https://github.com/JosephMontoya-TRI/qmpy_py3/tarball/master#egg=qmpy",
-        "https://github.com/ToyotaResearchInstitute/protosearch/tarball/master#egg=protosearch",
     ],
     entry_points={
         "console_scripts": [
