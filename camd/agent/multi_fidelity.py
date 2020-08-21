@@ -230,7 +230,7 @@ class GPMultiAgent(HypothesisAgent):
     def __init__(self, candidate_data=None, seed_data=None, chemsys_col='reduced_formula', features=None, 
                  fidelities=('theory_data', 'expt_data'), target_prop=None, target_prop_val=1.8, 
                  preprocessor=StandardScaler(), alpha=0.8, rank_thres=5, unc_percentile=30, 
-                 query_criteria='cost_ratio', total_budget=None, cost_considered=False):
+                 query_criteria='cost_ratio', total_budget=None):
         self.candidate_data = candidate_data
         self.seed_data = seed_data
         self.chemsys_col = chemsys_col
@@ -244,7 +244,6 @@ class GPMultiAgent(HypothesisAgent):
         self.unc_percentile = unc_percentile
         self.query_criteria = query_criteria
         self.total_budget = total_budget
-        self.cost_considered = cost_considered
         super(GPMultiAgent).__init__()
 
         """
@@ -270,9 +269,7 @@ class GPMultiAgent(HypothesisAgent):
                                      will be used to query hypotheses. .                        
             total_budget (int)       The budget for the hypotheses query. If query_criteria is 'cost_ratio', this should 
                                      be an amount indicate costs, if query_criteria is 'number', this should be a 
-                                     a total number of queries. 
-            cost_considered (bool)   If True, query hypotheses by considering the cost of the materials. If False, query 
-                                     hypotheses based on uncertainty and halluciation. 
+                                     a total number of queries.
             """
     def _get_features_from_df(self, df, add_fea=[]):
         """
@@ -310,15 +307,6 @@ class GPMultiAgent(HypothesisAgent):
             X_train = self.preprocessor.fit_transform(X_train)
             X_test = self.preprocessor.transform(X_test)
         return X_train, y_train, X_test, y_test
-    
-    def _explore_by_cost(self, high_fidelity, low_fidelity):
-        high_fidel_normalized = high_fidelity.pred_unc/high_fidelity.cost_ratio
-        low_fidel_normalized = low_fidelity.pred_unc/low_fidelity.cost_ratio
-        if high_fidel_normalized >= low_fidel_normalized.values[0]:
-            candidate = high_fidelity
-        else: 
-            candidate = low_fidelity
-        return candidate
         
     def _halluciate_lower_fidelity(self, seed_data, candidate_data, low_fidelity_data):
         # make copy of seed and candidate data, so we don't mess with the original one
@@ -357,27 +345,27 @@ class GPMultiAgent(HypothesisAgent):
         high_fidelity_candidates = high_fidelity_candidates.sort_values('pred_lcb')
         unc_thres = np.percentile(np.array(high_fidelity_candidates.pred_unc), self.unc_percentile)
         
-        selected_hypotheses = pd.DataFrame(columns=candidate_data.columns) 
-        for idx, candidate in high_fidelity_candidates.iterrows():
-            if self.query_criteria == 'number':
-                total_cost = len(selected_hypotheses)
-            elif self.query_criteria == 'cost_ratio':
-                total_cost = np.sum(selected_hypotheses[self.query_criteria])
-            
-            # query more hypotheses if total budget is not fulfilled
-            if total_cost < self.total_budget:
-                chemsys = candidate[self.chemsys_col]
-                low_fidelity = candidate_data.loc[(candidate_data[self.chemsys_col] == chemsys)&
-                                                  (candidate_data[self.fidelities[0]] == 1)]
-                # exploit 
-                if (candidate.pred_unc <= unc_thres) or (len(low_fidelity) == 0):
-                    selected_hypotheses = selected_hypotheses.append(candidate)
-                # explore 
-                else:
-                    if self.cost_considered:
-                        hypotheses = self._explore_by_cost(high_fidelity, low_fidelity)
+        selected_hypotheses = pd.DataFrame(columns=candidate_data.columns)
+        if len(exp_candidates) == 0:
+            return None
+
+        else:
+            for idx, candidate in high_fidelity_candidates.iterrows():
+                if self.query_criteria == 'number':
+                    total_cost = len(selected_hypotheses)
+                elif self.query_criteria == 'cost_ratio':
+                    total_cost = np.sum(selected_hypotheses[self.query_criteria])
+
+                # query more hypotheses if total budget is not fulfilled
+                if total_cost < self.total_budget:
+                    chemsys = candidate[self.chemsys_col]
+                    low_fidelity = candidate_data.loc[(candidate_data[self.chemsys_col] == chemsys)&
+                                                      (candidate_data[self.fidelities[0]] == 1)]
+                    # exploit
+                    if (candidate.pred_unc <= unc_thres) or (len(low_fidelity) == 0):
+                        selected_hypotheses = selected_hypotheses.append(candidate)
+                    # explore
                     else:
-                        # explore by halluciaing 
                         orig_rank = high_fidelity_candidates.index.get_loc(idx)
                         new_rank = self._get_rank_after_hallucination(seed_data, candidate_data, idx, low_fidelity)
                         delta_rank = new_rank - orig_rank

@@ -2,10 +2,12 @@
 """
 This module provides resources for agent optimization campaigns
 """
+import os
+from copy import copy
+
 from camd.experiment.base import Experiment, ATFSampler
 from camd.campaigns.base import Campaign
 from monty.os import cd
-import os
 
 
 class LocalAgentSimulation(Experiment):
@@ -74,11 +76,13 @@ class LocalAgentSimulation(Experiment):
             None
 
         """
+        # TODO: this is a hackish solution to analyzer statefulness
+        analyzer = copy(self.analyzer)
         campaign = Campaign(
                 candidate_data=self.atf_dataframe,
                 seed_data=self.seed_data,
                 agent=agent,
-                analyzer=self.analyzer,
+                analyzer=analyzer,
                 experiment=ATFSampler(
                     dataframe=self.atf_dataframe
                 ),
